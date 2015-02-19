@@ -51,7 +51,7 @@ object FinagleRedisSampleApp extends App with SimpleCommands {
   // the key "queue:1" and with some values pushed directly in this same sample.
   // It's important to notice that the order of the listener and the push sample is
   // not relevant and actually they are executed in paralel and Redis will warranty
-  // that is the push arrives first the values will be kept at Redis until the
+  // that if the push arrives first the values will be kept at Redis until the
   // listener is active and if the listener arrives first it will loop until the
   // values are pushed, and actually it will wait forever for the pushes so
   // you can issue an RPUSH command using the key "queue:1" from any other Redis

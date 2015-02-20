@@ -1,9 +1,11 @@
 import com.twitter.finagle.redis
 import com.twitter.finagle.redis.util.StringToChannelBuffer
 import com.twitter.finagle.redis.util.CBToString
+import com.twitter.finagle.util.DefaultTimer
+import com.twitter.util.Duration
 import com.twitter.util.Future
 
-trait SimpleCommands {
+trait SampleCommands {
 
   // The SET command is rather simple, it just converts the key and value arguments
   // into a string channel buffers that are actually the types needed at finagle-redis
@@ -30,31 +32,47 @@ trait SimpleCommands {
     }
   }
 
-  def simpleQueueListener(redisClient: redis.Client, queueKey: String) = {
-    println("Queue listener opened for the list with key " + queueKey)
+  def queueListener(redisClient: redis.Client, queueKey: String) = {
+    println("Queue '" + queueKey + "' opened (Dot signals queue polling, the numbers are data received at the queue)")
+    val k = StringToChannelBuffer(queueKey)
     def loop: Future[Nothing] = {
-      val k = StringToChannelBuffer(queueKey)
-      // A blocking left pop (BLPOP) can be used more efficiently here when
+      // A blocking left pop (BLPOP) command can be used more efficiently here when
       // finagle-redis supports it. http://redis.io/commands/blpop
       redisClient.lPop(k) flatMap {
         case Some(v) =>
           val value = CBToString(v)
-          print(value + " ")
+          print(value)
           loop
         case _ =>
-          // A short time pause should be attempted for the empty reads loop case
-          // for not saturating the network bandwidth nor the CPU as a workaround
-          // until the BLPOP command is available for finagle-redis.
-          loop
+          print(".")
+          // As a workaround until the BLPOP command and similars are available at
+          // finagle-redis do a short pause while polling.
+          val pollingPause = Duration.fromMilliseconds(100)
+          Future.sleep(pollingPause)(DefaultTimer.twitter) flatMap {
+            case _ =>
+            loop
+          }
       }
     }
     loop
   }
 
-  def simpleQueuePush(redisClient: redis.Client, queueKey: String, value: String) = {
+  def pushSampleDataToQueue(redisClient: redis.Client, queueKey: String) = {
     val k = StringToChannelBuffer(queueKey)
-    val v = StringToChannelBuffer(value)
-    redisClient.rPush(k, List(v))
+    def loop: Future[Nothing] = {
+      val v = StringToChannelBuffer((math.random * 10).toInt.toString)
+      redisClient.rPush(k, List(v)) flatMap {
+        case _ =>
+          // The push pause is optional and it's only for simulating a more easy display
+          // sample in the console (you can try to vary the push pause and see what happens)
+          val pushPause = Duration.fromMilliseconds((math.random * 1000).toInt)
+          Future.sleep(pushPause)(DefaultTimer.twitter) flatMap {
+            case _ =>
+              loop
+          }
+      }
+    }
+    loop
   }
 
 }

@@ -3,7 +3,7 @@ import com.twitter.finagle.redis
 import com.twitter.finagle.redis.util.{CBToString, StringToChannelBuffer}
 import com.twitter.util.{Await, Future}
 
-object FinagleRedisSampleApp extends App with SimpleCommands {
+object FinagleRedisSampleApp extends App with SampleCommands {
 
   // The Redis client is built using a service factory, so let's construct one first
   val serviceFactory = Redis.newClient("localhost:6379")
@@ -25,6 +25,7 @@ object FinagleRedisSampleApp extends App with SimpleCommands {
   // build itself using again flatMap ... that's the beauty of Future: it compose very good
   val storeAndRetrieveSample = buildRedisClient flatMap {
     redisClient =>
+      println("Storing 'one' with the key 'key:1' in Redis")
       simpleSet(redisClient, "key:1", "one") flatMap {
         case _ => simpleGet(redisClient, "key:1")
       }
@@ -34,7 +35,7 @@ object FinagleRedisSampleApp extends App with SimpleCommands {
   // use them in a onSuccess/onFailure traditional use
   storeAndRetrieveSample onSuccess {
     case Some(value) =>
-      println("Value retrieved from redis: " + value)
+      println("Value retrieved from Redis with the key 'key:1': '" + value + "'")
     case _ =>
       println("ERROR: No value was read")
   } onFailure {
@@ -47,46 +48,36 @@ object FinagleRedisSampleApp extends App with SimpleCommands {
   // Future.join
   Await.ready(storeAndRetrieveSample)
 
-  // Now let's create a queue sample with a listener of any value at the list with
-  // the key "queue:1" and with some values pushed directly in this same sample.
-  // It's important to notice that the order of the listener and the push sample is
-  // not relevant and actually they are executed in paralel and Redis will warranty
-  // that if the push arrives first the values will be kept at Redis until the
-  // listener is active and if the listener arrives first it will loop until the
-  // values are pushed, and actually it will wait forever for the pushes so
-  // you can issue an RPUSH command using the key "queue:1" from any other Redis
-  // client and see the values just pop here
-  val queueKey = "queue:1"
+  // Now let's create a queue listener sample that will consume any value
+  // pushed with the key "queue:1".
   val queueListenerSample = buildRedisClient flatMap {
     redisClient =>
-      simpleQueueListener(redisClient, queueKey)
-  }
-  val queuePushSample = buildRedisClient flatMap {
-    redisClient =>
-      val push200 = (1 to 200) map { i =>
-        simpleQueuePush(redisClient, queueKey, i.toString)
-      }
-      Future.collect(push200)
+      queueListener(redisClient, "queue:1")
   }
 
-  // Only report on failure events since the listener is an eternal loop that
-  // will only report on a failure event. This kind of listener is constructed
-  // using a loop that produces a failure only future
+  // The queue listener will be polling the queue with a future loop eternally that
+  // will only report on failures (thus this is an on failure only future sample)
   queueListenerSample onFailure {
     case e: Exception =>
-      println("ERROR: " + e.getMessage)
+      println("Queue listener error: " + e.getMessage)
   }
 
-  // Report on the push sample success or failure
-  queuePushSample onSuccess {
-    case _ => println("\nPushed 200 values complete")
-  } onFailure {
-    case e: Exception => println("ERROR: " + e.getMessage)
+  // Now let's push data to the same queue. In this sample we just keep pushing
+  // in an eternal loop.
+  val queuePushSample = buildRedisClient flatMap {
+    redisClient =>
+      pushSampleDataToQueue(redisClient, "queue:1")
   }
 
-  // At this point we can just wait for the listener because it will last forever
-  // and only stops if a failure is receives, but as an example of the Future.join
-  // combinator here you have a sample
+  // Report on the push sample only with the on failure event since the push sample
+  // is also an on failure future loop.
+  queuePushSample onFailure {
+    case e: Exception => println("Queue push error: " + e.getMessage)
+  }
+
+  // Now wait for both the listener and the push sample, the failure of one does NOT
+  // imply the failure of the other that is OK for this sample, for other cases
+  // you may considere compose this futures, or use other Future combinators.
   Await.ready(Future.join(queueListenerSample, queuePushSample))
 
 }

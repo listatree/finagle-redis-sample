@@ -12,7 +12,7 @@ object FinagleRedisSampleApp extends App with SampleCommands {
   // using the SET command and retrieve the value using the GET command. The important
   // part here is that the GET command should be attemped once the SET command is complete
   // that is why we concatenate the future of the SET command to the future of the GET
-  // command using flatMap
+  // command using flatMap ... that's the beauty of futures: they compose very good
   val storeAndRetrieveSample = simpleSet(redisClient, "key:1", "one") flatMap {
     case _ => simpleGet(redisClient, "key:1")
   }
